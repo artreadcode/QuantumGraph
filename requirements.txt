@@ -1,4 +1,0 @@
-qiskit
-scipy
-qiskit-experiments
-qiskit-aer

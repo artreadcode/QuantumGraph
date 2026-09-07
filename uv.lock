@@ -687,6 +687,11 @@ wheels = [
 ]
 
 [[package]]
+name = "micromoth-td"
+version = "0.1.0"
+source = { git = "https://github.com/moth-quantum/MicroMoth.git?rev=td#c8728fc51ed7d2608588ea46d1cbf3a91284a6ef" }
+
+[[package]]
 name = "numpy"
 version = "2.5.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1385,6 +1390,7 @@ name = "quantumgraph"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "micromoth-td" },
     { name = "qiskit" },
     { name = "qiskit-aer" },
     { name = "qiskit-experiments" },
@@ -1393,6 +1399,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "micromoth-td", git = "https://github.com/moth-quantum/MicroMoth.git?rev=td" },
     { name = "qiskit", specifier = ">=2.5.2" },
     { name = "qiskit-aer", specifier = ">=0.17.2" },
     { name = "qiskit-experiments", specifier = ">=0.14.2" },

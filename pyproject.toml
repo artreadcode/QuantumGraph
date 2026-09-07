@@ -9,4 +9,5 @@ dependencies = [
     "qiskit-aer>=0.17.2",
     "qiskit-experiments>=0.14.2",
     "scipy>=1.18.1",
+    "micromoth-td @ git+https://github.com/moth-quantum/MicroMoth.git@td", # The special link for the MicroMoth.py only
 ]
