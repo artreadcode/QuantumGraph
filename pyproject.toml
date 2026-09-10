@@ -11,3 +11,10 @@ dependencies = [
     "scipy>=1.18.1",
     "micromoth-td @ git+https://github.com/moth-quantum/MicroMoth.git@td", # The special link for the MicroMoth.py only
 ]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["microquantumgraph", "expectationvalue"]
