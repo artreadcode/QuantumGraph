@@ -1,5 +1,6 @@
+from math import pi
 from micromoth import QuantumCircuit
-from quantumgraph.ExpectationValue import ExpectationValue
+from expectationvalue import ExpectationValue
 
 class MicroQuantumGraph():
     def __init__(self, quantumcircuit):
@@ -7,7 +8,7 @@ class MicroQuantumGraph():
         self.observables = self.get_observables()
         self.backend = self.update_tomography()
         # self.update_tomography()
-        # All these three are needed in MicroQuantumGraph.
+        # All these three are enough in MicroQuantumGraph.
     
     def get_observables(self):
         observables = []
@@ -46,8 +47,20 @@ class MicroQuantumGraph():
 
     def get_relationship(self, qubit0, qubit1):
         ''' Returns per-pair values '''
-        relationship = []
+        relationship = {}
         
+        full_pauli = ['I'] * self.qc.num_qubits
+        for pauli in ['XX', 'XY', 'XZ', 'YX', 'YY', 'YZ', 'ZX', 'ZY', 'ZZ']:
+            full_pauli[qubit0] = pauli[0]
+            full_pauli[qubit1] = pauli[1]
+            k = ''.join(full_pauli)
+            if k in self.pauli_decomp:
+                relationship[pauli] = self.pauli_decomp[k]
+            else:
+                b0 = self.get_bloch(qubit0); b1 = self.get_bloch(qubit1)
+                relationship[pauli] = b0[pauli[0]] * b1[pauli[1]]
+            full_pauli[qubit0] = 'I'; full_pauli[qubit1] = 'I' 
+    
         return relationship
 
 
@@ -67,6 +80,15 @@ def build_circuit(features, num_qubits, pairs):
     Returns a MicroMoth QuantumCircuit.
     '''
     qc = QuantumCircuit(num_qubits)
-    # TODO
-    return qc
-        
+    
+    low, mid, high, rms = features['low'], features['mid'], features['high'], features['rms']
+    for i in range(num_qubits):
+        qc.rx(pi * mid, i)
+        qc.rz(pi * high, i)
+    if rms > 0.0:
+        for (j, k) in pairs:
+            qc.cx(j, k)
+    for i in range(num_qubits):
+        qc.rx(pi * low, i)
+    
+    return qc 
