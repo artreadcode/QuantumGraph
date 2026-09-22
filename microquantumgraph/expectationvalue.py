@@ -6,53 +6,66 @@ import random
 
 class ExpectationValue():
     
-    def __init__(self,n,k=2,pairs=None):
+    def __init__(self, n, k=2, coupling_map=None, pairs=None):
 
         self.n = n
         self.k = k
-        
-        if pairs:
-            self.pairs = pairs
+
+        coupling_map = coupling_map if coupling_map is not None else pairs
+
+        if coupling_map: # This one is for MicroMoth because it uses 'coupling_map' rather than 'pairs'.
+            self.coupling_map = [[min(j, k_), max(j, k_)] for j, k_ in coupling_map
+                                 if j != k_]
         else:
-            self.pairs = []
-            for i in range(n-1):
-                for j in range(i,n):
-                    self.pairs.append([i,j])
-                    
+            self.coupling_map = [[i, j] for i in range(n) for j in range(i + 1, n)]
+
         self.neighbours = self._get_neighbours()
 
-        paulis = ['I','X','Y','Z']
-
-        paths = [ [j] for j in range(self.n)]
-        for i in range(self.k-1):
+        self.paths = [[j] for j in range(self.n)]
+        for _ in range(self.k - 1):
             new_paths = []
-            for path in paths:
+            for path in self.paths:
                 q0 = path[-1]
                 for q1 in self.neighbours[q0]:
                     if q1 not in path:
                         new_path = copy.copy(path)
                         new_path.append(q1)
                         new_paths.append(new_path)
-            paths = new_paths
-                    
-        self.pauli_decomp = {}
-        for path in paths:
-            for pauli_k in itertools.product(*(paulis for _ in range(self.k))):
-                pauli_n = id_n = ['I']*n
-                for j,q in enumerate(path):
-                    pauli_n[q] = pauli_k[j]
-                self.pauli_decomp[''.join(pauli_n)] = float('X' not in pauli_k and 'Y' not in pauli_k)
+            self.paths = new_paths
 
-        self._supported_by = [{p:[] for p in ['I','X','Y','Z']} for _ in range(n)]
+        self.initialize_decomp()
+
+    # `pairs` kept as a read-only alias so older call sites keep working.
+    @property
+    def pairs(self):
+        return self.coupling_map
+
+    def initialize_decomp(self):
+        '''Resets the tracked state to |0...0>.'''
+        paulis = ['I', 'X', 'Y', 'Z']
+
+        self.pauli_decomp = {}
+        for path in self.paths:
+            for pauli_k in itertools.product(*(paulis for _ in range(self.k))):
+                pauli_n = ['I'] * self.n
+                for j, q in enumerate(path):
+                    pauli_n[q] = pauli_k[j]
+                self.pauli_decomp[''.join(pauli_n)] = float(
+                    'X' not in pauli_k and 'Y' not in pauli_k)
+
+        self._supported_by = [{p: [] for p in ['I', 'X', 'Y', 'Z']}
+                              for _ in range(self.n)]
         for pauli_n in self.pauli_decomp:
-            for q in range(n):
+            for q in range(self.n):
                 self._supported_by[q][pauli_n[q]].append(pauli_n)
-                    
+
     def _get_neighbours(self):
-        neighbours = {j:[] for j in range(self.n)}
-        for [j,k] in self.pairs:
-            neighbours[j].append(k)
-            neighbours[k].append(j)
+        neighbours = {j: [] for j in range(self.n)}
+        for [j, k] in self.coupling_map:
+            if k not in neighbours[j]:
+                neighbours[j].append(k)
+            if j not in neighbours[k]:
+                neighbours[k].append(j)
         return neighbours
     
     def _get_gates(self,qc):
@@ -62,11 +75,15 @@ class ExpectationValue():
         '''
 
         gates = []
-        # When we read the H gate, it turns into RZ.RY.RZ. for Quantum Graph calculation.
+        # H = U3(pi/2, 0, pi), which the original applies as rz(lam), ry(the),
+        # rz(phi) -- i.e. rz(pi) then ry(pi/2). The earlier rz(pi/2).ry(pi/2).
+        # rz(pi/2) is a different gate and swaps X with Y in every result.
         def h(q):
-            gates.append(('rz', pi/2, q))
+            gates.append(('rz', pi, q))
             gates.append(('ry', pi/2, q))
-            gates.append(('rz', pi/2, q))
+
+        def cx(s, t):
+            h(t); gates.append(('cz', s, t)); h(t)
             
         for gate in qc.data:
             name = gate[0]
@@ -80,7 +97,22 @@ class ExpectationValue():
                 h(gate[1])
             elif name == 'cx':
                 s, t = gate[1], gate[2]
-                h(t); gates.append(('cz', s, t)); h(t)
+                cx(s, t)
+            elif name == 'crx':
+                # Qiskit's CRX definition, written in the gate set this model
+                # tracks exactly. A dialable entangler -- identity at theta=0,
+                # cx at theta=pi -- so audio level can fade a graph edge in and
+                # out instead of switching it.
+                theta, s, t = float(gate[1]), gate[2], gate[3]
+                gates.append(('rz', pi/2, t))
+                cx(s, t)
+                gates.append(('ry', -theta/2, t))
+                cx(s, t)
+                gates.append(('ry', theta/2, t))
+                gates.append(('rz', -pi/2, t))
+            elif name == 'swap':
+                s, t = gate[1], gate[2]
+                cx(s, t); cx(t, s); cx(s, t)
             elif name in ('init', 'm'):
                 continue # ignore because it's useless here
             else:
@@ -98,8 +130,18 @@ class ExpectationValue():
         list_string[index] = char
         return ''.join(list_string)
     
-    def apply_circuit(self,qc,verbose=False):
-        
+    def apply_circuit(self, qc, verbose=False, reinitialize=True):
+        '''
+        Applies `qc` to the tracked state.
+
+        Args:
+            reinitialize: reset to |0...0> first (default). Pass False to fold
+                `qc` onto the state already tracked -- that is what makes a
+                per-frame update cost only the new gates.
+        '''
+        if reinitialize:
+            self.initialize_decomp()
+
         gates = self._get_gates(qc)
         
         flips = {'XI':'XZ',
